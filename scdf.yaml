@@ -1,0 +1,292 @@
+# scdf.yaml - Spring Cloud Dataflow Server and Skipper
+---
+# ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: scdf-sa
+  namespace: scdf
+---
+# ClusterRole for SCDF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: scdf-role
+rules:
+  - apiGroups: [""]
+    resources: ["services", "pods", "replicationcontrollers", "persistentvolumeclaims", "configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: scdf-rb
+subjects:
+  - kind: ServiceAccount
+    name: scdf-sa
+    namespace: scdf
+roleRef:
+  kind: ClusterRole
+  name: scdf-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Skipper ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: skipper-config
+  namespace: scdf
+data:
+  application.yaml: |
+    spring:
+      cloud:
+        config:
+          enabled: false
+        skipper:
+          server:
+            platform:
+              kubernetes:
+                accounts:
+                  default:
+                    environmentVariables: 'SPRING_CLOUD_STREAM_KAFKA_BINDER_BROKERS=kafka.kafka.svc.cluster.local:9092,JAVA_TOOL_OPTIONS=-Xmx256m -Xms128m'
+                    limits:
+                      memory: 512Mi
+                      cpu: 500m
+                    requests:
+                      memory: 256Mi
+                      cpu: 100m
+      datasource:
+        url: jdbc:mariadb://mysql.scdf.svc.cluster.local:3306/dataflow?allowPublicKeyRetrieval=true
+        username: dataflow
+        password: dataflow123
+        driver-class-name: org.mariadb.jdbc.Driver
+      jpa:
+        hibernate:
+          ddl-auto: update
+---
+# Skipper Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: skipper
+  namespace: scdf
+  labels:
+    app: skipper
+spec:
+  type: NodePort
+  ports:
+    - port: 7577
+      targetPort: 7577
+      nodePort: 30081
+  selector:
+    app: skipper
+---
+# Skipper Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skipper
+  namespace: scdf
+  labels:
+    app: skipper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: skipper
+  template:
+    metadata:
+      labels:
+        app: skipper
+    spec:
+      serviceAccountName: scdf-sa
+      containers:
+        - name: skipper
+          image: springcloud/spring-cloud-skipper-server:2.11.5
+          ports:
+            - containerPort: 7577
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:ReservedCodeCacheSize=32M -Xss512k -Xmx768m -Xms256m"
+            - name: BPL_JVM_HEAD_ROOM
+              value: "10"
+            - name: BPL_JVM_LOADED_CLASS_COUNT
+              value: "35000"
+            - name: BPL_JVM_THREAD_COUNT
+              value: "50"
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: /config/
+            - name: SPRING_CLOUD_CONFIG_ENABLED
+              value: "false"
+            - name: SPRING_CLOUD_KUBERNETES_ENABLED
+              value: "false"
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 200m
+            limits:
+              memory: 1536Mi
+              cpu: 1000m
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 7577
+            initialDelaySeconds: 180
+            periodSeconds: 15
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 7577
+            initialDelaySeconds: 240
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: config
+          configMap:
+            name: skipper-config
+---
+# Dataflow Server ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dataflow-config
+  namespace: scdf
+data:
+  application.yaml: |
+    spring:
+      cloud:
+        config:
+          enabled: false
+        dataflow:
+          server:
+            uri: http://dataflow-server.scdf.svc.cluster.local:9393
+          task:
+            platform:
+              kubernetes:
+                accounts:
+                  default:
+                    limits:
+                      memory: 512Mi
+                      cpu: 500m
+                    requests:
+                      memory: 256Mi
+                      cpu: 100m
+        skipper:
+          client:
+            serverUri: http://skipper.scdf.svc.cluster.local:7577/api
+      datasource:
+        url: jdbc:mariadb://mysql.scdf.svc.cluster.local:3306/dataflow?allowPublicKeyRetrieval=true
+        username: dataflow
+        password: dataflow123
+        driver-class-name: org.mariadb.jdbc.Driver
+      jpa:
+        hibernate:
+          ddl-auto: update
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: "*"
+---
+# Dataflow Server Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: dataflow-server
+  namespace: scdf
+  labels:
+    app: dataflow-server
+spec:
+  type: NodePort
+  ports:
+    - port: 9393
+      targetPort: 9393
+      nodePort: 30080
+  selector:
+    app: dataflow-server
+---
+# Dataflow Server Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dataflow-server
+  namespace: scdf
+  labels:
+    app: dataflow-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dataflow-server
+  template:
+    metadata:
+      labels:
+        app: dataflow-server
+    spec:
+      serviceAccountName: scdf-sa
+      containers:
+        - name: dataflow-server
+          image: springcloud/spring-cloud-dataflow-server:2.11.5
+          ports:
+            - containerPort: 9393
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:ReservedCodeCacheSize=32M -Xss512k -Xmx768m -Xms256m"
+            - name: BPL_JVM_HEAD_ROOM
+              value: "10"
+            - name: BPL_JVM_LOADED_CLASS_COUNT
+              value: "35000"
+            - name: BPL_JVM_THREAD_COUNT
+              value: "50"
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: /config/
+            - name: SPRING_CLOUD_KUBERNETES_SECRETS_ENABLE_API
+              value: "false"
+            - name: SPRING_CLOUD_KUBERNETES_CONFIG_ENABLE_API
+              value: "false"
+            - name: SPRING_CLOUD_CONFIG_ENABLED
+              value: "false"
+            - name: SPRING_CLOUD_KUBERNETES_ENABLED
+              value: "false"
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 200m
+            limits:
+              memory: 1536Mi
+              cpu: 1000m
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          readinessProbe:
+            tcpSocket:
+              port: 9393
+            initialDelaySeconds: 180
+            periodSeconds: 15
+            timeoutSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9393
+            initialDelaySeconds: 240
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: config
+          configMap:
+            name: dataflow-config

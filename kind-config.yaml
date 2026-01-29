@@ -1,0 +1,33 @@
+# kind-config.yaml - Simplified single-node configuration
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: scdf-cluster
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # SCDF Dashboard
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP
+      # Kafka (外部存取)
+      - containerPort: 30092
+        hostPort: 30092
+        protocol: TCP
+      # Skipper
+      - containerPort: 30081
+        hostPort: 30081
+        protocol: TCP
+      # HTTP 80 for Ingress
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      # HTTPS 443 for Ingress
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP

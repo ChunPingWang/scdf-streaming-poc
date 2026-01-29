@@ -1,0 +1,54 @@
+# scdf-values.yaml
+server:
+  service:
+    type: NodePort
+    nodePorts:
+      http: 30080
+  configuration:
+    defaultPodResources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+skipper:
+  service:
+    type: NodePort
+    nodePorts:
+      http: 30081
+  configuration:
+    accountName: default
+
+kafka:
+  enabled: false
+
+externalKafka:
+  brokers: scdf-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
+
+mariadb:
+  enabled: false
+
+externalDatabase:
+  host: mysql.scdf.svc.cluster.local
+  port: 3306
+  driver: "com.mysql.cj.jdbc.Driver"
+  scheme: mysql
+  dataflow:
+    database: dataflow
+    username: dataflow
+    password: dataflow123
+  skipper:
+    database: dataflow
+    username: dataflow
+    password: dataflow123
+
+deployer:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi

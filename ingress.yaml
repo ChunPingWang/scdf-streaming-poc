@@ -1,0 +1,27 @@
+# ingress.yaml - Ingress for SCDF Dashboard
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: scdf-ingress
+  namespace: scdf
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /dashboard
+            pathType: Prefix
+            backend:
+              service:
+                name: dataflow-server
+                port:
+                  number: 9393
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dataflow-server
+                port:
+                  number: 9393
